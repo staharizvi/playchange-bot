@@ -1,6 +1,28 @@
+# Virtual environments
+.venv/
 venv/
+env/
+ENV/
+
+# Python cache/build output
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Local secrets and runtime state
 .env
+.env.*
+!.env.example
+sessions/
 *.session
 settings.json
+
+# Logs
+*.log
+streamlit*.log
