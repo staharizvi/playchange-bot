@@ -1,2 +1,2 @@
-instagrapi
+instagrapi==2.6.8
 streamlit

@@ -142,6 +142,16 @@ if run:
                     cl.get_timeline_feed()
                     logged_in = True
                     add_log("SUCCESS", f"Session restored for @{username}")
+                except PleaseWaitFewMinutes:
+                    print(f"SESSION RESTORE PleaseWaitFewMinutes:\n{traceback.format_exc()}")
+                    add_log("ERROR", "Instagram asked us to wait before another login attempt")
+                    st.error("Instagram is temporarily blocking login attempts for this account/device/IP. Wait at least 15-30 minutes, approve any login/challenge inside the Instagram app, then try again without repeated retries.")
+                    st.stop()
+                except ChallengeRequired:
+                    print(f"SESSION RESTORE ChallengeRequired:\n{traceback.format_exc()}")
+                    add_log("ERROR", "Instagram challenge required")
+                    st.error("Instagram is asking for verification. Open the Instagram app, approve or complete the challenge, then try again here.")
+                    st.stop()
                 except Exception as e:
                     add_log("WARNING", f"Saved session expired [{type(e).__name__}]: {e}")
                     print(f"SESSION RESTORE ERROR:\n{traceback.format_exc()}")
@@ -162,6 +172,11 @@ if run:
                     logged_in = True
                     cl.dump_settings(session_file)
                     add_log("SUCCESS", f"Logged in as @{username} (session saved)")
+                except PleaseWaitFewMinutes:
+                    print(f"LOGIN PleaseWaitFewMinutes:\n{traceback.format_exc()}")
+                    add_log("ERROR", "Instagram asked us to wait before another login attempt")
+                    st.error("Login temporarily blocked by Instagram: please wait before trying again. This usually happens after a challenge, repeated login attempts, or an untrusted server/IP. Open Instagram on your phone, complete any warning or challenge, then wait 15-30 minutes before retrying here.")
+                    st.stop()
                 except TwoFactorRequired:
                     print(f"LOGIN TwoFactorRequired:\n{traceback.format_exc()}")
                     add_log("ERROR", "2FA code required")
