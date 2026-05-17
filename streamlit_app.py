@@ -12,7 +12,7 @@ from instagrapi import Client
 from instagrapi.exceptions import (
     BadPassword, InvalidTargetUser, UserNotFound,
     PleaseWaitFewMinutes, LoginRequired, ChallengeRequired,
-    TwoFactorRequired
+    ChallengeError, ChallengeUnknownStep, TwoFactorRequired
 )
 
 SESSION_DIR = Path(__file__).parent / "sessions"
@@ -31,12 +31,52 @@ def add_log(level, message):
     timestamp = datetime.now().strftime("%H:%M:%S")
     st.session_state.logs.append({"time": timestamp, "level": level, "message": message})
 
+def is_bloks_redirect_challenge(error):
+    text = str(error)
+    return (
+        'step_name "STEP_NAME"' in text
+        and "com.bloks.www.ig.challenge.redirect.async" in text
+    )
+
+def unsupported_challenge_message(username):
+    return (
+        f"Instagram put @{username} behind a checkpoint that this bot cannot complete "
+        "inside Streamlit. Open Instagram in the official app or browser, finish the "
+        "verification/checkpoint for this account, wait a few minutes, then try again. "
+        "If this keeps happening, use the 'Clear saved session' button and retry after "
+        "the checkpoint is fully cleared."
+    )
+
+def make_instagram_client(username, verification_code):
+    cl = Client()
+    cl.delay_range = [1, 3]
+
+    def challenge_code_handler(_username, _choice):
+        code = verification_code.strip()
+        if code:
+            return code
+        raise ChallengeError(
+            "Instagram requested a verification code. Enter the code in the sidebar "
+            "2FA / Verification Code field, then run again."
+        )
+
+    cl.challenge_code_handler = challenge_code_handler
+    return cl
+
 # --- Sidebar: Credentials ---
 with st.sidebar:
     st.header("🔐 Instagram Login")
     username = st.text_input("Username", placeholder="your_username")
     password = st.text_input("Password", type="password", placeholder="your_password")
     verification_code = st.text_input("2FA / Verification Code (if needed)", placeholder="123456")
+    if username:
+        sidebar_session_file = SESSION_DIR / f"{username}_session.json"
+        if st.button("Clear saved session", use_container_width=True):
+            if sidebar_session_file.exists():
+                sidebar_session_file.unlink()
+                st.success(f"Cleared saved session for @{username}")
+            else:
+                st.info(f"No saved session found for @{username}")
     st.markdown("---")
     st.header("⚙️ Settings")
     delay_min = st.slider("Min delay (seconds)", 5, 30, 10)
@@ -128,8 +168,7 @@ if run:
     else:
         # Login with session reuse
         with st.spinner("Logging in to Instagram..."):
-            cl = Client()
-            cl.delay_range = [1, 3]
+            cl = make_instagram_client(username, verification_code)
             session_file = SESSION_DIR / f"{username}_session.json"
 
             logged_in = False
@@ -152,14 +191,26 @@ if run:
                     add_log("ERROR", "Instagram challenge required")
                     st.error("Instagram is asking for verification. Open the Instagram app, approve or complete the challenge, then try again here.")
                     st.stop()
+                except ChallengeUnknownStep as e:
+                    print(f"SESSION RESTORE ChallengeUnknownStep:\n{traceback.format_exc()}")
+                    if is_bloks_redirect_challenge(e):
+                        add_log("WARNING", "Saved session hit an Instagram checkpoint; clearing it and trying a fresh login once")
+                        try:
+                            session_file.unlink()
+                        except FileNotFoundError:
+                            pass
+                        cl = make_instagram_client(username, verification_code)
+                    else:
+                        add_log("ERROR", "Instagram returned a challenge this bot cannot solve")
+                        st.error(unsupported_challenge_message(username))
+                        st.stop()
                 except Exception as e:
                     add_log("WARNING", f"Saved session expired [{type(e).__name__}]: {e}")
                     print(f"SESSION RESTORE ERROR:\n{traceback.format_exc()}")
                     old_settings = cl.get_settings()
-                    cl = Client()
+                    cl = make_instagram_client(username, verification_code)
                     cl.set_settings({})
                     cl.set_uuids(old_settings["uuids"])
-                    cl.delay_range = [1, 3]
 
             if not logged_in:
                 add_log("INFO", f"Logging in fresh as @{username}...")
@@ -200,6 +251,25 @@ if run:
                     print(f"LOGIN ChallengeRequired:\n{traceback.format_exc()}")
                     add_log("ERROR", "Instagram challenge required")
                     st.error("Login failed: Instagram is asking for verification. Open the Instagram app, approve the login attempt, then try again here.")
+                    st.stop()
+                except ChallengeUnknownStep as e:
+                    print(f"LOGIN ChallengeUnknownStep:\n{traceback.format_exc()}")
+                    add_log("ERROR", "Instagram returned a challenge this bot cannot solve")
+                    if is_bloks_redirect_challenge(e):
+                        st.error("Login failed: " + unsupported_challenge_message(username))
+                    else:
+                        st.error("Login failed: Instagram sent a newer challenge screen that this library cannot complete automatically. Open Instagram for this account, finish the verification/checkpoint manually, then wait a few minutes and try again here.")
+                    if session_file.exists():
+                        st.info("I cleared the saved session for this account so your next attempt starts fresh.")
+                        try:
+                            session_file.unlink()
+                        except FileNotFoundError:
+                            pass
+                    st.stop()
+                except ChallengeError as e:
+                    print(f"LOGIN ChallengeError:\n{traceback.format_exc()}")
+                    add_log("ERROR", f"Instagram challenge failed: {e}")
+                    st.error(f"Login failed: {e}")
                     st.stop()
                 except LoginRequired:
                     print(f"LOGIN LoginRequired:\n{traceback.format_exc()}")
